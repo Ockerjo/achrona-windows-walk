@@ -1,0 +1,137 @@
+# The Hack the Future student path on a fresh Windows machine, line by line as the briefing
+# (Setup, achronagame.com/hackthefuture/briefing/en/) says, timed. A throwaway probe: no answers,
+# no kit source; it clones a REHEARSAL team's repo with that team's key (secret
+# REHEARSAL_TEAM_KEY, never printed) and pushes one note file to it.
+name: windows student path
+
+on:
+  workflow_dispatch:
+    inputs:
+      team:
+        description: rehearsal team slug (its repo is unlockd-htf-2026/achrona-<team>)
+        default: rehearsal-2
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  walk:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      TEAM: ${{ inputs.team || 'rehearsal-2' }}
+      TEAM_KEY: ${{ secrets.REHEARSAL_TEAM_KEY }}
+    defaults:
+      run:
+        # Git Bash, as the briefing tells Windows students (PowerShell only where it says so).
+        shell: bash
+    steps:
+      - name: 0. the machine
+        run: |
+          echo "| step | seconds | note |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          git --version; choco --version; uname -a
+          test -n "$TEAM_KEY" || { echo "::error::secret REHEARSAL_TEAM_KEY is not set"; exit 1; }
+
+      - name: 1a. choco install fvm (briefing Setup 1, Windows)
+        shell: powershell
+        run: |
+          $t = Get-Date
+          choco install fvm -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $s = [int]((Get-Date) - $t).TotalSeconds
+          "| choco install fvm | $s | $(fvm --version) |" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: 1b. fvm install 3.47.5
+        run: |
+          s=$SECONDS
+          fvm install 3.47.5
+          echo "| fvm install 3.47.5 | $((SECONDS-s)) | SDK $(du -sh ~/fvm 2>/dev/null | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 2. the team key + git setup (briefing Setup 2, verbatim but the key)
+        run: |
+          s=$SECONDS
+          git config --global achrona.teamkey "$TEAM_KEY"
+          git config --global credential.https://github.com.useHttpPath true
+          git config --global --replace-all credential.https://github.com.helper ""
+          git config --global --add credential.https://github.com.helper '!f(){ test "$1" = get || return 0; r=$(curl -sS --fail-with-body --data-binary @- --oauth2-bearer "$(git config --global achrona.teamkey)" https://achrona-ai-server.jonas-ockerman-965.workers.dev/git-credential) && echo "$r" || { echo "$r" >&2; echo quit=1; }; }; f'
+          git config --global --get-all credential.https://github.com.helper | sed 's/oauth2-bearer.*/(helper set)/'
+          git config --global user.name "Windows walk (CI)"
+          git config --global user.email "windows-walk@unlockd.invalid"
+          echo "| git setup (4 lines + name) | $((SECONDS-s)) | |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 3. clone into C:\dev (briefing Setup 3)
+        run: |
+          s=$SECONDS
+          git config --global core.autocrlf input
+          git config --global core.longpaths true
+          mkdir -p /c/dev && cd /c/dev
+          git clone "https://github.com/unlockd-htf-2026/achrona-$TEAM.git"
+          cd "achrona-$TEAM" && git log --oneline -1
+          echo "| git clone (team key via the Worker) | $((SECONDS-s)) | $(grep -A3 'achrona_kit:' pubspec.yaml | grep ref | xargs) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 4a. fvm flutter doctor
+        working-directory: C:\dev\achrona-${{ env.TEAM }}
+        run: |
+          s=$SECONDS
+          fvm flutter doctor || true
+          echo "| fvm flutter doctor | $((SECONDS-s)) | |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 4b. fvm flutter pub get (first time)
+        working-directory: C:\dev\achrona-${{ env.TEAM }}
+        run: |
+          s=$SECONDS
+          fvm flutter pub get
+          echo "| fvm flutter pub get | $((SECONDS-s)) | pub cache $(du -sh "$LOCALAPPDATA/Pub/Cache" 2>/dev/null | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 5. web build (what ./run chrome compiles; a runner has no screen)
+        working-directory: C:\dev\achrona-${{ env.TEAM }}
+        run: |
+          s=$SECONDS
+          fvm flutter build web --dart-define-from-file=config/event.json
+          echo "| fvm flutter build web | $((SECONDS-s)) | build $(du -sh build/web | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 6a. ./challenge base-01 (Git Bash) — RED expected, for the right reason
+        working-directory: C:\dev\achrona-${{ env.TEAM }}
+        run: |
+          s=$SECONDS
+          code=0; ./challenge base-01 > ../base01-bash.txt 2>&1 || code=$?
+          tail -20 ../base01-bash.txt
+          note="exit $code"
+          if [ $code -eq 0 ]; then note="$note, GREEN (repo already solved it?)";
+          elif grep -q "renders mirrored" ../base01-bash.txt; then note="$note, red: the planted bug (ok)";
+          else note="$note, red for ANOTHER reason (tooling?)"; echo "::error::base-01 failed for an unexpected reason"; fi
+          echo "| ./challenge base-01 (Git Bash) | $((SECONDS-s)) | $note |" >> "$GITHUB_STEP_SUMMARY"
+          echo "$note" | grep -q "ANOTHER" && exit 1 || exit 0
+
+      - name: 6b. .\challenge.ps1 base-01 (PowerShell, as the briefing writes it)
+        working-directory: C:\dev\achrona-${{ env.TEAM }}
+        shell: powershell
+        run: |
+          $t = Get-Date
+          powershell -ExecutionPolicy Bypass -File .\challenge.ps1 base-01 *> ..\base01-ps.txt
+          $code = $LASTEXITCODE
+          Get-Content ..\base01-ps.txt -Tail 20
+          $s = [int]((Get-Date) - $t).TotalSeconds
+          $note = "exit $code"
+          if ($code -eq 0) { $note += ", GREEN (repo already solved it?)" }
+          elseif (Select-String -Path ..\base01-ps.txt -Pattern "renders mirrored" -Quiet) { $note += ", red: the planted bug (ok)" }
+          else { $note += ", red for ANOTHER reason (tooling?)"; "::error::challenge.ps1 base-01 failed for an unexpected reason" }
+          "| .\challenge.ps1 base-01 (PowerShell) | $s | $note |" >> $env:GITHUB_STEP_SUMMARY
+          if ($note -like "*ANOTHER*") { exit 1 } else { exit 0 }
+
+      - name: 7. a small commit + git push (the team key again)
+        working-directory: C:\dev\achrona-${{ env.TEAM }}
+        run: |
+          s=$SECONDS
+          mkdir -p notes
+          echo "Windows walk ${GITHUB_RUN_ID} $(date -u +%FT%TZ): cloned, built, pushed from windows-latest." >> notes/windows-walk.txt
+          git add notes/windows-walk.txt
+          git commit -q -m "notes: the Windows walk (CI probe ${GITHUB_RUN_ID})"
+          git push origin HEAD
+          echo "| commit + git push | $((SECONDS-s)) | $(git rev-parse --short HEAD) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 8. forget the key
+        if: always()
+        run: git config --global --unset achrona.teamkey || true
