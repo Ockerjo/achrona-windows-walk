@@ -21,7 +21,14 @@ jobs:
           choco install fvm -y --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           fvm install 3.47.5
+      - name: PowerShell - how a key reaches pub token add (method matrix, fake key)
+        shell: powershell
+        working-directory: probe
+        run: |
+          "### Method matrix" | Add-Content $env:GITHUB_STEP_SUMMARY
+          .\matrix.ps1
       - name: PowerShell - run.ps1 and challenge.ps1
+        if: always()
         shell: powershell
         working-directory: probe
         run: |

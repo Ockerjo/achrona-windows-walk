@@ -25,13 +25,19 @@ function Fresh([string]$name) {
   $env:PUB_CACHE = Join-Path $PSScriptRoot ".cache-$name"
   Remove-Item -Recurse -Force $env:PUB_CACHE -ErrorAction SilentlyContinue
 }
-# Registers a key for the mock the way the kit scripts do (the key on pub's stdin). NOT quiet (run 4):
-# prints pub's exit code and output (it holds no key: "Enter secret token:" / "Requests to <url> will now ...").
+# Registers a key for the mock with the REAL Add-KitToken of the rendered run.ps1 (the code a student's
+# hidden prompt reaches, extracted and run here): prints pub's exit code and whether pub token list shows the URL.
+$PubUrl = $Url
+$m = [regex]::Match((Get-Content -Raw (Join-Path $PSScriptRoot "run.ps1")), '(?s)function Add-KitToken.*?\r?\n}\r?\n')
+if (-not $m.Success) { Say "FAIL: no Add-KitToken in run.ps1"; exit 1 }
+Invoke-Expression $m.Value
 function AddToken([string]$k, [string]$what) {
-  $o = ""
-  try { if ($useFvm) { $o = ($k | fvm flutter pub token add $Url 2>&1 | Out-String) } else { $o = ($k | & (Get-Command flutter -CommandType Application | Select-Object -First 1) pub token add $Url 2>&1 | Out-String) } } catch { $o = "THREW: $($_.Exception.Message)" }
+  try { Add-KitToken $k } catch { Say "    add token ($what) THREW: $($_.Exception.Message)" }
   $code = $LASTEXITCODE
-  Say ("    add token ($what): exit $code; " + ($o -replace "htf-[A-Za-z0-9-]+", "htf-***" -replace "\r?\n", " | "))
+  $listed = (Tokens).Contains($Url)
+  Say "    add token ($what) with run.ps1's Add-KitToken: exit $code; pub token list shows the URL: $listed"
+  $global:LASTEXITCODE = 0
+  return @{ code = $code; listed = $listed }
 }
 # One run of a script as a student runs it: its own fresh powershell (default Continue), stdin an EMPTY
 # file (a prompt would see EOF, never wait on a console), output to files, and a HARD TIMEOUT: a hang is a
@@ -69,7 +75,8 @@ try {
   Check "students: a fresh powershell -NoProfile starts with Continue (the kit scripts run in it)" ($child -eq "Continue")
   # DIAGNOSTIC (run 4): register the key unquietly, then show what this process and a fresh child see.
   Say ""; Say "#### diagnostic: the token store, as the registering process and as a fresh child see it"; Say '```'
-  Fresh diag; Quiet pub token remove $Url; AddToken $Key "good key"
+  Fresh diag; Quiet pub token remove $Url; $r = AddToken $Key "good key"
+  Check "registration: run.ps1 Add-KitToken exits 0 and pub lists the URL" (($r.code -eq 0) -and $r.listed)
   & powershell -NoProfile -ExecutionPolicy Bypass -File .\diag.ps1 parent-fresh 2>&1 | ForEach-Object { Say "$_" }
   $d = Student "diag.ps1" "child"
   $d -split "`r?`n" | ForEach-Object { if ($_ -ne "") { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $_ } }
@@ -80,14 +87,14 @@ try {
     $name = $s[0]; $arg = $s[1]
     Say "| -- | **.\$name** (PowerShell, a fresh powershell -NoProfile -File, as a student's) |"
     # 1. A registered key: the script must not ask, pub get downloads the fake kit, the key stays unprinted.
-    Fresh $name; Quiet pub token remove $Url; AddToken $Key "good key"
+    Fresh $name; Quiet pub token remove $Url; $null = AddToken $Key "good key"
     $out = Student $name $arg
     Check "$name`: finished within 2 minutes (a hang is killed)" (-not $script:timedOut)
     Check "$name`: with the key registered it does not ask" (-not ($out -match "First run|no team key given|Team key \(htf"))
     Check "$name`: pub get downloaded the kit with it" (HasKit)
     Check "$name`: the key is never printed" (-not $out.Contains($Key))
     # 2. A WRONG key registered: the message, the token removed, nothing downloaded (a fresh cache).
-    Fresh "$name-bad"; Quiet pub token remove $Url; AddToken "htf-wrong-key" "wrong key"
+    Fresh "$name-bad"; Quiet pub token remove $Url; $null = AddToken "htf-wrong-key" "wrong key"
     $out = Student $name $arg
     Check "$name`: bad key: finished within 2 minutes" (-not $script:timedOut)
     Check "$name`: a bad key says to check the team key" ($out -match "check your team key")

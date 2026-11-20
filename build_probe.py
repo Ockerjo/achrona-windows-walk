@@ -18,7 +18,6 @@ for n in ["run", "run.ps1", "challenge", "challenge.ps1"]:
     assert PUB_URL in t, n
     open(os.path.join(out, n), "w", newline="").write(t.replace(PUB_URL, URL))
     if n in ("run", "challenge"): os.chmod(os.path.join(out, n), 0o755)
-shutil.copy(os.path.join(repo, "tool", "mock_pub.py"), out)
 open(os.path.join(out, "pubspec.yaml"), "w").write(
     f"name: probe\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\ndependencies:\n  achrona_kit:\n    hosted: {URL}\n    version: 0.1.7\n")
 open(os.path.join(out, ".gitattributes"), "w").write("run text eol=lf\nchallenge text eol=lf\n*.sh text eol=lf\n*.ps1 text eol=crlf\n")

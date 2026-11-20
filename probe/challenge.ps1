@@ -8,9 +8,31 @@ function flutter {
   else { & (Get-Command flutter -CommandType Application | Select-Object -First 1) @args }
 }
 # The hosted kit's one-time team key (run.ps1 and challenge.ps1 share this; kit/runners.py).
+# pub reads the token as ONE line from stdin. A PowerShell pipe ends the string with CRLF and pub keeps the
+# CR ("not a valid token", exit 65), so the key goes as raw bytes + LF straight into pub's stdin: no pipe, no
+# file, never on a command line or the screen.
 function Add-KitToken([string]$Key) {
-  if ($useFvm) { $Key | fvm flutter pub token add $PubUrl | Out-Null }
-  else { $Key | & (Get-Command flutter -CommandType Application | Select-Object -First 1) pub token add $PubUrl | Out-Null }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  if ($useFvm) {
+    $psi.FileName = (Get-Command fvm -CommandType Application | Select-Object -First 1).Source
+    $psi.Arguments = "flutter pub token add $PubUrl"
+  } else {
+    $psi.FileName = (Get-Command flutter -CommandType Application | Select-Object -First 1).Source
+    $psi.Arguments = "pub token add $PubUrl"
+  }
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardInput = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $p = [System.Diagnostics.Process]::Start($psi)
+  $bytes = [System.Text.Encoding]::ASCII.GetBytes($Key + "`n")
+  $p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+  $p.StandardInput.BaseStream.Flush()
+  $p.StandardInput.Close()
+  $null = $p.StandardOutput.ReadToEnd()
+  $null = $p.StandardError.ReadToEnd()
+  $p.WaitForExit()
+  $global:LASTEXITCODE = $p.ExitCode
 }
 $PubUrl = "http://127.0.0.1:8765/pub"
 $hosted = Select-String -Quiet -SimpleMatch -Pattern "hosted: $PubUrl" pubspec.yaml
@@ -33,7 +55,7 @@ if ($hosted -and -not $usb) {
   if ($LASTEXITCODE -ne 0) {
     if ($out -match '401|403|authenticat') {
       flutter pub token remove $PubUrl | Out-Null
-      Write-Host "The kit download was refused: check your team key (on your team card) or run Connect GitHub on your team page. The next run asks for the key again."
+      Write-Host "The kit download was refused: check your team key (it is on your team card). The next run asks for the key again."
     }
     exit 1
   }

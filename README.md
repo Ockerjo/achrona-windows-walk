@@ -23,3 +23,11 @@ console** (Jonas or a tester): delete the token (`fvm flutter pub token remove <
 field names only, never a key; the output is scrubbed of `htf-...`): `pub token list` raw, run.ps1's own
 detection line, URL forms, the relevant environment variables and `%APPDATA%\dart\pub-tokens.json`'s entries.
 `probe.ps1` registers the key without `Quiet` and prints pub's exit code and output.
+
+## Run 5 (method matrix + the fixed template)
+
+Run 4 showed `$Key | fvm flutter pub token add <url>` fails on Windows PowerShell 5.1 (exit 65, "not a valid
+token": the pipe ends the string with CRLF and pub keeps the CR). `matrix.ps1` tries the alternatives with
+the fake key only and prints exit code, whether `pub token list` shows the URL, and whether the stored
+token equals the key. `probe.ps1` now registers keys with the REAL `Add-KitToken` extracted from the
+rendered `run.ps1` (the fixed template: raw bytes + LF on pub's stdin through System.Diagnostics.Process).

@@ -21,7 +21,7 @@ if grep -qF "hosted: $PUB_URL" pubspec.yaml && ! grep -qs '^  achrona_kit:' pubs
   if ! flutter pub get 2>&1 | tee "$log"; then
     if grep -qiE '401|403|authenticat' "$log"; then
       flutter pub token remove "$PUB_URL" >/dev/null 2>&1
-      echo "The kit download was refused: check your team key (on your team card) or run Connect GitHub on your team page. The next ./run asks for the key again."
+      echo "The kit download was refused: check your team key (it is on your team card). The next run asks for the key again."
     fi
     exit 1
   fi
