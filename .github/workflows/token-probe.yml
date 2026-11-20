@@ -12,7 +12,7 @@ permissions:
 jobs:
   probe:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: fvm + Flutter 3.47.5 (the briefing's Setup)
