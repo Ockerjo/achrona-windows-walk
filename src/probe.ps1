@@ -25,21 +25,25 @@ function Fresh([string]$name) {
   $env:PUB_CACHE = Join-Path $PSScriptRoot ".cache-$name"
   Remove-Item -Recurse -Force $env:PUB_CACHE -ErrorAction SilentlyContinue
 }
-# Registers a key for the mock the way the kit scripts do (the key on pub's stdin).
-function AddToken([string]$k) {
-  try { if ($useFvm) { $k | fvm flutter pub token add $Url 2>&1 | Out-Null } else { $k | & (Get-Command flutter -CommandType Application | Select-Object -First 1) pub token add $Url 2>&1 | Out-Null } } catch { }
-  $global:LASTEXITCODE = 0
+# Registers a key for the mock the way the kit scripts do (the key on pub's stdin). NOT quiet (run 4):
+# prints pub's exit code and output (it holds no key: "Enter secret token:" / "Requests to <url> will now ...").
+function AddToken([string]$k, [string]$what) {
+  $o = ""
+  try { if ($useFvm) { $o = ($k | fvm flutter pub token add $Url 2>&1 | Out-String) } else { $o = ($k | & (Get-Command flutter -CommandType Application | Select-Object -First 1) pub token add $Url 2>&1 | Out-String) } } catch { $o = "THREW: $($_.Exception.Message)" }
+  $code = $LASTEXITCODE
+  Say ("    add token ($what): exit $code; " + ($o -replace "htf-[A-Za-z0-9-]+", "htf-***" -replace "\r?\n", " | "))
 }
-# One run of a kit script as a student runs it: its own fresh powershell (default Continue), stdin an EMPTY
+# One run of a script as a student runs it: its own fresh powershell (default Continue), stdin an EMPTY
 # file (a prompt would see EOF, never wait on a console), output to files, and a HARD TIMEOUT: a hang is a
-# FAIL after 2 minutes, with the output so far. Returns the output; $script:timedOut says if it was killed.
+# FAIL after $TimeoutMs, with the output so far. Returns the output; $script:timedOut says if it was killed.
+$TimeoutMs = 60000
 function Student([string]$kitScript, [string]$arg) {
   $so = Join-Path $PSScriptRoot "student.out"; $se = Join-Path $PSScriptRoot "student.err"; $si = Join-Path $PSScriptRoot "student.in"
   Remove-Item $so, $se -ErrorAction SilentlyContinue; Set-Content -Path $si -Value "" -NoNewline
   $p = Start-Process powershell -PassThru -WindowStyle Hidden -WorkingDirectory $PSScriptRoot `
     -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".\$kitScript", $arg `
     -RedirectStandardInput $si -RedirectStandardOutput $so -RedirectStandardError $se
-  $script:timedOut = -not $p.WaitForExit(120000)
+  $script:timedOut = -not $p.WaitForExit($TimeoutMs)
   if ($script:timedOut) { & taskkill /PID $p.Id /T /F 2>&1 | Out-Null; $global:LASTEXITCODE = 0 }
   $o = ""; foreach ($f in @($so, $se)) { if (Test-Path $f) { $o += (Get-Content -Raw $f -ErrorAction SilentlyContinue) } }
   Write-Host $o
@@ -63,20 +67,27 @@ try {
   Check "checker: a native stderr line (token remove with none) does not throw" (-not $threw)
   $child = (powershell -NoProfile -Command '$ErrorActionPreference' | Out-String).Trim()
   Check "students: a fresh powershell -NoProfile starts with Continue (the kit scripts run in it)" ($child -eq "Continue")
+  # DIAGNOSTIC (run 4): register the key unquietly, then show what this process and a fresh child see.
+  Say ""; Say "#### diagnostic: the token store, as the registering process and as a fresh child see it"; Say '```'
+  Fresh diag; Quiet pub token remove $Url; AddToken $Key "good key"
+  & powershell -NoProfile -ExecutionPolicy Bypass -File .\diag.ps1 parent-fresh 2>&1 | ForEach-Object { Say "$_" }
+  $d = Student "diag.ps1" "child"
+  $d -split "`r?`n" | ForEach-Object { if ($_ -ne "") { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $_ } }
+  Say '```'; Say ""
   Quiet pub token remove $Url
 
   foreach ($s in @(@("run.ps1", "nodevice"), @("challenge.ps1", "base-01"))) {
     $name = $s[0]; $arg = $s[1]
     Say "| -- | **.\$name** (PowerShell, a fresh powershell -NoProfile -File, as a student's) |"
     # 1. A registered key: the script must not ask, pub get downloads the fake kit, the key stays unprinted.
-    Fresh $name; Quiet pub token remove $Url; AddToken $Key
+    Fresh $name; Quiet pub token remove $Url; AddToken $Key "good key"
     $out = Student $name $arg
     Check "$name`: finished within 2 minutes (a hang is killed)" (-not $script:timedOut)
     Check "$name`: with the key registered it does not ask" (-not ($out -match "First run|no team key given|Team key \(htf"))
     Check "$name`: pub get downloaded the kit with it" (HasKit)
     Check "$name`: the key is never printed" (-not $out.Contains($Key))
     # 2. A WRONG key registered: the message, the token removed, nothing downloaded (a fresh cache).
-    Fresh "$name-bad"; Quiet pub token remove $Url; AddToken "htf-wrong-key"
+    Fresh "$name-bad"; Quiet pub token remove $Url; AddToken "htf-wrong-key" "wrong key"
     $out = Student $name $arg
     Check "$name`: bad key: finished within 2 minutes" (-not $script:timedOut)
     Check "$name`: a bad key says to check the team key" ($out -match "check your team key")
