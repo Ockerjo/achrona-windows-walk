@@ -1,0 +1,36 @@
+# Proof of the kit's team-key step on Windows (run.ps1 / challenge.ps1 in PowerShell, ./run and
+# ./challenge in Git Bash), against a FAKE hosted pub: a mock that checks a made-up Bearer key and
+# serves a one-line fake package. Nothing of the real kit, template, keys or pack art is in this
+# repo (it is public) and it needs no secret.
+name: team-key step on Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: fvm + Flutter 3.47.5 (the briefing's Setup)
+        shell: powershell
+        run: |
+          choco install fvm -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          fvm install 3.47.5
+      - name: PowerShell - run.ps1 and challenge.ps1
+        shell: powershell
+        working-directory: probe
+        run: |
+          "### PowerShell (Windows PowerShell 5.1)" | Add-Content $env:GITHUB_STEP_SUMMARY
+          .\probe.ps1
+      - name: Git Bash - ./run and ./challenge
+        if: always()
+        shell: bash
+        working-directory: probe
+        run: |
+          echo "### Git Bash" >> "$GITHUB_STEP_SUMMARY"
+          ./probe.sh

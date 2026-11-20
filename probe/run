@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# ./run [device]   run the game: chrome (default), macos, windows, linux or an
+#                  emulator id (`flutter devices`). Extra flags pass through.
+# The event's server values (public, no secrets) come from config/event.json;
+# without that file the game runs offline.
+# The kit downloads from http://127.0.0.1:8765/pub with your team key: the first ./run asks
+# for it once (hidden) and hands it to pub (`flutter pub token add`); nothing
+# else stores it. A kit in pubspec_overrides.yaml (the coaches' USB copy) needs
+# no key.
+set -uo pipefail
+cd "$(dirname "$0")"
+# The kit needs Flutter 3.47 (.fvmrc); use fvm's pin when it is installed.
+flutter() { if command -v fvm >/dev/null; then fvm flutter "$@"; else command flutter "$@"; fi; }
+device="${1:-chrome}"; [ $# -gt 0 ] && shift
+# The hosted kit's one-time team key (./run and ./challenge share this; kit/runners.py).
+PUB_URL="http://127.0.0.1:8765/pub"
+if grep -qF "hosted: $PUB_URL" pubspec.yaml && ! grep -qs '^  achrona_kit:' pubspec_overrides.yaml; then
+  if ! flutter pub token list 2>/dev/null | grep -qF "$PUB_URL"; then
+    echo "First run: the kit downloads from $PUB_URL with your team key (asked once)."
+    read -r -s -p "Team key (htf-..., on your team card): " key; echo
+    [ -n "$key" ] || { echo "no team key given: nothing downloaded"; exit 1; }
+    printf '%s\n' "$key" | flutter pub token add "$PUB_URL" >/dev/null \
+      || { unset key; echo "could not store the team key for $PUB_URL"; exit 1; }
+    unset key
+  fi
+  log="$(mktemp)"; trap 'rm -f "$log"' EXIT
+  if ! flutter pub get 2>&1 | tee "$log"; then
+    if grep -qiE '401|403|authenticat' "$log"; then
+      flutter pub token remove "$PUB_URL" >/dev/null 2>&1
+      echo "The kit download was refused: check your team key (on your team card) or run Connect GitHub on your team page. The next ./run asks for the key again."
+    fi
+    exit 1
+  fi
+fi
+if [ -f config/event.json ]; then
+  flutter run -d "$device" --dart-define-from-file=config/event.json "$@"
+else
+  echo "no config/event.json: the game runs offline (no login, no online features)"
+  flutter run -d "$device" "$@"
+fi

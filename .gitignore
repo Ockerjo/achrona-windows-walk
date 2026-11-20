@@ -1,0 +1,6 @@
+probe/fake/
+probe/.cache-*/
+probe/.dart_tool/
+probe/pubspec.lock
+probe/mock.log
+probe/mock.err

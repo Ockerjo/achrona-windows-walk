@@ -1,0 +1,7 @@
+name: probe
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  achrona_kit:
+    hosted: http://127.0.0.1:8765/pub
+    version: 0.1.7

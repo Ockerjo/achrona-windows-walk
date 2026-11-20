@@ -1,7 +1,7 @@
-# Windows walk (CI probe, throwaway)
+# Windows probe for the kit's team-key step (a throwaway; nothing of the kit is here)
 
-Runs the Hack the Future student setup on a fresh `windows-latest` runner, step by step as the
-briefing says (choco + fvm, the team-key git helper, clone, pub get, a web build, `./challenge
-base-01` in Git Bash and PowerShell, one commit + push), and times each step in the run summary.
-It clones a rehearsal team's repo with that team's key (secret `REHEARSAL_TEAM_KEY`). No game
-code or answers live here. Archived after the run.
+`python3 build_probe.py <monorepo>/achrona` renders `probe/`: the four runner scripts of the kit
+(`run`, `run.ps1`, `challenge`, `challenge.ps1`, with `PUB_URL` pointed at a local mock), `mock_pub.py`
+(a stand-in for the Worker's /pub: it checks a made-up Bearer key and serves a one-line fake
+`achrona_kit`), a one-dependency pubspec, and the checkers `probe.ps1` / `probe.sh`.
+`.github/workflows/token-probe.yml` runs both on windows-latest. No secret, no real key.
