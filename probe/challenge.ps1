@@ -8,31 +8,35 @@ function flutter {
   else { & (Get-Command flutter -CommandType Application | Select-Object -First 1) @args }
 }
 # The hosted kit's one-time team key (run.ps1 and challenge.ps1 share this; kit/runners.py).
-# pub reads the token as ONE line from stdin. A PowerShell pipe ends the string with CRLF and pub keeps the
-# CR ("not a valid token", exit 65), so the key goes as raw bytes + LF straight into pub's stdin: no pipe, no
-# file, never on a command line or the screen.
+# The key reaches `pub token add` on stdin, and in Windows PowerShell 5.1 a PIPE (and any stream writer) starts
+# with a UTF-8 BOM that pub keeps as part of the token ("not a valid token", exit 65; measured on windows-latest).
+# Only a FILE of the exact bytes works: key + LF, ASCII, no BOM, as stdin of Start-Process. The file is in the
+# user's own %TEMP% for about 3 seconds (pub itself stores the same key in plain JSON in %APPDATA%\dart), and is
+# overwritten with zeros and deleted in the finally on every path. The key is never on a command line or printed.
 function Add-KitToken([string]$Key) {
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  if ($useFvm) {
-    $psi.FileName = (Get-Command fvm -CommandType Application | Select-Object -First 1).Source
-    $psi.Arguments = "flutter pub token add $PubUrl"
-  } else {
-    $psi.FileName = (Get-Command flutter -CommandType Application | Select-Object -First 1).Source
-    $psi.Arguments = "pub token add $PubUrl"
+  if (-not ($Key -cmatch '^[\x21-\x7E]+$')) {
+    Write-Host "The team key has a character a key never has: check your team key (on your team card)."
+    $global:LASTEXITCODE = 65
+    return
   }
-  $psi.UseShellExecute = $false
-  $psi.RedirectStandardInput = $true
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
-  $p = [System.Diagnostics.Process]::Start($psi)
-  $bytes = [System.Text.Encoding]::ASCII.GetBytes($Key + "`n")
-  $p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-  $p.StandardInput.BaseStream.Flush()
-  $p.StandardInput.Close()
-  $null = $p.StandardOutput.ReadToEnd()
-  $null = $p.StandardError.ReadToEnd()
-  $p.WaitForExit()
-  $global:LASTEXITCODE = $p.ExitCode
+  $tmp = [System.IO.Path]::GetTempFileName()
+  $out = [System.IO.Path]::GetTempFileName()
+  $err = [System.IO.Path]::GetTempFileName()
+  try {
+    [System.IO.File]::WriteAllBytes($tmp, [System.Text.Encoding]::ASCII.GetBytes($Key + "`n"))
+    if ($useFvm) {
+      $exe = "fvm"
+      $argText = "flutter pub token add $PubUrl"
+    } else {
+      $exe = (Get-Command flutter -CommandType Application | Select-Object -First 1).Source
+      $argText = "pub token add $PubUrl"
+    }
+    $p = Start-Process $exe -ArgumentList $argText -RedirectStandardInput $tmp -RedirectStandardOutput $out -RedirectStandardError $err -NoNewWindow -Wait -PassThru
+    $global:LASTEXITCODE = $p.ExitCode
+  } finally {
+    try { [System.IO.File]::WriteAllBytes($tmp, (New-Object byte[] 64)) } catch { }
+    Remove-Item -Force -ErrorAction SilentlyContinue $tmp, $out, $err
+  }
 }
 $PubUrl = "http://127.0.0.1:8765/pub"
 $hosted = Select-String -Quiet -SimpleMatch -Pattern "hosted: $PubUrl" pubspec.yaml

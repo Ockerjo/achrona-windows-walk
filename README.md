@@ -31,3 +31,11 @@ token": the pipe ends the string with CRLF and pub keeps the CR). `matrix.ps1` t
 the fake key only and prints exit code, whether `pub token list` shows the URL, and whether the stored
 token equals the key. `probe.ps1` now registers keys with the REAL `Add-KitToken` extracted from the
 rendered `run.ps1` (the fixed template: raw bytes + LF on pub's stdin through System.Diagnostics.Process).
+
+## Run 6 (the BOM)
+
+Run 5: in Windows PowerShell 5.1 every pipe, and a Process stdin writer too, starts the key with a UTF-8 BOM
+(`b'\xef\xbb\xbfhtf-...'`) that pub keeps in the token (exit 65). Only a file of the exact bytes (ASCII key + LF)
+as `Start-Process -RedirectStandardInput` works. The kit template now does that (temp file in %TEMP%,
+zeroed and deleted in a finally); the matrix keeps the byte dump and checks the rendered `Add-KitToken`
+(exit 0, listed, stored == key) and the non-ASCII refusal (exit 65); `probe.ps1` then runs end to end.

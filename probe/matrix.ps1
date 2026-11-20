@@ -51,48 +51,17 @@ Say ""; Say "#### methods of 'pub token add' (fake key; listed = pub token list 
 Say "| method | exit | listed | stored == key | stored length (key = $($Key.Length)) |"; Say "|---|---|---|---|---|"
 Reset
 
-# (a) the current method
-if ($useFvm) { $Key | fvm flutter pub token add $Url 2>&1 | Out-Null } else { $Key | flutter pub token add $Url 2>&1 | Out-Null }
-Report "(a) PS pipe: `$Key | fvm flutter pub token add (the v0.1.7 scripts)" $LASTEXITCODE
-# (b) UTF-8 without BOM for the pipe
-$OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$Key | fvm flutter pub token add $Url 2>&1 | Out-Null
-Report "(b) PS pipe with `$OutputEncoding = UTF8 no BOM" $LASTEXITCODE
-$OutputEncoding = $oe
-# (h) key + LF piped: PowerShell then adds CRLF after it, pub reads the first line only
-($Key + "`n") | fvm flutter pub token add $Url 2>&1 | Out-Null
-Report "(h) PS pipe of (`$Key + LF): pub reads the first line" $LASTEXITCODE
-# (c) cmd echo (INFORMATIONAL: puts the key on a command line, never usable for a real key)
-cmd /c "echo $Key| fvm flutter pub token add $Url" 2>&1 | Out-Null
-Report "(c) cmd /c echo | fvm (key on a command line: info only)" $LASTEXITCODE
-# (d) a temp file as stdin, in its own temp dir, deleted in finally
-$dir = Join-Path ([IO.Path]::GetTempPath()) ("kt-" + [Guid]::NewGuid().ToString("N"))
-try {
-  New-Item -ItemType Directory -Path $dir | Out-Null
-  $f = Join-Path $dir "in.txt"
-  [IO.File]::WriteAllText($f, $Key + "`n", (New-Object System.Text.UTF8Encoding($false)))
-  $p = Start-Process fvm -ArgumentList "flutter", "pub", "token", "add", $Url -NoNewWindow -Wait -PassThru -RedirectStandardInput $f -RedirectStandardOutput (Join-Path $dir "o.txt") -RedirectStandardError (Join-Path $dir "e.txt")
-  Report "(d) temp file (LF, UTF8 no BOM) + Start-Process -RedirectStandardInput" $p.ExitCode
-} finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
-# (e) the Dart SDK directly (the fvm-resolved dart.exe), piped
-$dart = $null
-try {
-  $root = (fvm flutter --version --machine 2>$null | Out-String | ConvertFrom-Json).flutterRoot
-  $dart = Join-Path $root "bin\cache\dart-sdk\bin\dart.exe"
-} catch { }
-if ($dart -and (Test-Path $dart)) {
-  $Key | & $dart pub token add $Url 2>&1 | Out-Null
-  Report "(e) dart.exe directly, PS pipe" $LASTEXITCODE
-  $r = Raw $dart "pub token add $Url"
-  Report "(e2) dart.exe directly, Process + raw bytes + LF" ($r -split "\|")[0]
-} else { Say "| (e) dart.exe not found ($dart) | - | - | - | - |" }
-# (g) fvm.exe via Process + raw bytes + LF (no pipe, no file, no command line)
-$fvmexe = (Get-Command fvm -CommandType Application | Select-Object -First 1).Source
-$r = Raw $fvmexe "flutter pub token add $Url"
-Report "(g) fvm.exe via Process + raw bytes + LF (the fixed template's method)" ($r -split "\|")[0]
+# Known good (run 5): (d) a temp file (LF, UTF8 no BOM) as Start-Process stdin. Known bad (exit 65, BOM): every pipe,
+# Process stdin writer, dart.exe directly. Dropped to save time; (t) is the template as rendered:
 # (t) the template's own Add-KitToken, extracted from the rendered run.ps1
 $ps1 = Get-Content -Raw (Join-Path $PSScriptRoot "run.ps1")
 $m = [regex]::Match($ps1, '(?s)function Add-KitToken.*?\r?\n}\r?\n')
-if ($m.Success) { $PubUrl = $Url; Invoke-Expression $m.Value; Add-KitToken $Key; Report "(t) run.ps1's Add-KitToken as rendered" $LASTEXITCODE }
+if ($m.Success) { $PubUrl = $Url; Invoke-Expression $m.Value; Add-KitToken $Key; Report "(t) run.ps1's Add-KitToken as rendered: MUST be exit 0, listed, stored == key" $LASTEXITCODE }
 else { Say "| (t) no Add-KitToken in run.ps1 | - | - | - | - |" }
 Reset
+
+# The refusal: a key with a non-ASCII character is refused first (exit 65, the check-your-team-key message), nothing stored.
+if ($m.Success) {
+  Add-KitToken ("htf-" + [char]0x00E9 + "-key") 2>&1 | ForEach-Object { Say "    refusal message: $_" }
+  Report "(t2) non-ASCII key: refused, MUST be exit 65, not listed" $LASTEXITCODE
+}
